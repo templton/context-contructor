@@ -7,24 +7,25 @@ from urllib.parse import urlparse
 
 # ===================== НАСТРОЙКИ =====================
 SOURCE_ROOT = r"C:\projects\my_project"   # папка проекта по умолчанию
-TARGET_DIR = r"C:\projects"   # папка вывода; файлы пресета кладутся в подпапку с именем пресета
+TARGET_DIR = None   # None = папка output рядом со скриптом
 PORT = 8765
 IGNORE_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", ".idea", ".vscode", "dist", "build"}
 IGNORE_FILES = {".DS_Store", "Thumbs.db"}
 MAX_FILES = 20000
-PROJECT_PROMPT_NAME = "PROJECT_PROMPT.md"   # общий промт, в корень папки вывода
+PROJECT_PROMPT_NAME = "AGENTS_MAIN.md"      # главный промт проекта, в корень output
 PRESET_PROMPT_NAME = "AGENTS.md"            # промт пресета, в папку пресета
 # ======================================================
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-DATA = os.path.join(BASE, "data")
+OUTPUT = os.path.join(BASE, "output")
+DATA = os.path.join(OUTPUT, "_data")   # пресеты и настройки тоже в output
 PRESETS = os.path.join(DATA, "presets")
 SETTINGS = os.path.join(DATA, "settings.json")
 os.makedirs(PRESETS, exist_ok=True)
 
 
 def load_settings():
-    s = {"source": SOURCE_ROOT, "target": TARGET_DIR, "general_prompt": ""}
+    s = {"source": SOURCE_ROOT, "target": TARGET_DIR or OUTPUT, "general_prompt": ""}
     if os.path.exists(SETTINGS):
         with open(SETTINGS, encoding="utf-8") as f:
             s.update(json.load(f))
@@ -88,15 +89,16 @@ _TR = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъыьэю
 
 
 def translit(name):
+    name = re.sub(r"[ыи]й", "iy", name.strip().lower())
     out = []
-    for ch in name.strip():
+    for ch in name:
         low = ch.lower()
         if low in _TR:
             t = _TR[low]
-            out.append(t.capitalize() if ch != low else t)
+            out.append(t)
         else:
             out.append(ch)
-    r = re.sub(r"[^A-Za-z0-9._-]+", "_", "".join(out)).strip("._ ")
+    r = re.sub(r"[^a-z0-9]+", "-", "".join(out)).strip("-")
     if not r:
         raise ValueError("Некорректное имя пресета")
     return r
@@ -236,7 +238,7 @@ h3{margin:12px 0 4px}
 <div id="right">
  <label>Папка вывода (файлы пойдут в подпапку = транслит имени пресета)</label><input type="text" id="target">
  <label><input type="checkbox" id="clean" checked> Очистить папку пресета перед копированием</label>
- <h3>Общий промт проекта (PROJECT_PROMPT.md в корень вывода)</h3><textarea id="gp" rows="4"></textarea>
+ <h3>Общий промт проекта (output/AGENTS_MAIN.md)</h3><textarea id="gp" rows="4"></textarea>
  <h3>Промт пресета (AGENTS.md в папке пресета)</h3><textarea id="pp" rows="4"></textarea>
  <input type="text" id="pname" placeholder="Имя пресета">
  <button onclick="savePreset()">Сохранить пресет</button>
@@ -307,7 +309,7 @@ async function copyNow(){
  try{await api('/api/settings',{source:$('source').value,target:$('target').value,general_prompt:$('gp').value});
  const j=await api('/api/copy',{source:$('source').value,target:$('target').value,preset_name:$('pname').value,files:[...sel],clean:$('clean').checked,
  general_prompt:$('gp').value,preset_prompt:$('pp').value});
- msg('Скопировано файлов: '+j.copied+(j.agents?' + AGENTS.md':'')+(j.general?' + PROJECT_PROMPT.md':'')+' → '+j.target,true);}catch(e){msg(e.message,false);}}
+ msg('Скопировано файлов: '+j.copied+(j.agents?' + AGENTS.md':'')+(j.general?' + AGENTS_MAIN.md':'')+' → '+j.target,true);}catch(e){msg(e.message,false);}}
 $('gp').onchange=()=>api('/api/settings',{general_prompt:$('gp').value});
 (async()=>{const s=await api('/api/state');$('source').value=s.settings.source;$('target').value=s.settings.target;
  $('gp').value=s.settings.general_prompt;presets=s.presets;renderPresets();loadTree();})();
