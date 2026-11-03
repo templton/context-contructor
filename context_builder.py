@@ -29,6 +29,7 @@ def load_settings():
     if os.path.exists(SETTINGS):
         with open(SETTINGS, encoding="utf-8") as f:
             s.update(json.load(f))
+    s["target"] = TARGET_DIR or OUTPUT   # целевая папка не запоминается между запусками
     return s
 
 
@@ -178,7 +179,7 @@ class H(BaseHTTPRequestHandler):
                 self.send({"tree": build_tree(d["root"]), "truncated": count > MAX_FILES})
             elif u == "/api/settings":
                 s = load_settings()
-                s.update({k: d[k] for k in ("source", "target", "general_prompt") if k in d})
+                s.update({k: d[k] for k in ("source", "general_prompt") if k in d})
                 save_settings(s)
                 self.send({"ok": True})
             elif u == "/api/preset/save":
