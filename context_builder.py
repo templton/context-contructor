@@ -7,12 +7,13 @@ from urllib.parse import urlparse
 
 # ===================== НАСТРОЙКИ =====================
 SOURCE_ROOT = r"C:\projects\my_project"   # папка проекта по умолчанию
-TARGET_DIR = r"C:\projects\context_out"   # куда копировать по умолчанию
+TARGET_DIR = r"C:\projects"   # папка вывода; файлы пресета кладутся в подпапку с именем пресета
 PORT = 8765
 IGNORE_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", ".idea", ".vscode", "dist", "build"}
 IGNORE_FILES = {".DS_Store", "Thumbs.db"}
 MAX_FILES = 20000
-PROMPT_FILE_NAME = "_PROMPT.md"
+PROJECT_PROMPT_NAME = "PROJECT_PROMPT.md"   # общий промт, в корень папки вывода
+PRESET_PROMPT_NAME = "AGENTS.md"            # промт пресета, в папку пресета
 # ======================================================
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -81,16 +82,37 @@ def safe_rel(root, rel):
     return full
 
 
+_TR = dict(zip("абвгдеёжзийклмнопрстуфхцчшщъыьэюя",
+    ["a", "b", "v", "g", "d", "e", "e", "zh", "z", "i", "y", "k", "l", "m", "n", "o", "p", "r", "s", "t", "u", "f", "kh",
+     "ts", "ch", "sh", "shch", "", "y", "", "e", "yu", "ya"]))
+
+
+def translit(name):
+    out = []
+    for ch in name.strip():
+        low = ch.lower()
+        if low in _TR:
+            t = _TR[low]
+            out.append(t.capitalize() if ch != low else t)
+        else:
+            out.append(ch)
+    r = re.sub(r"[^A-Za-z0-9._-]+", "_", "".join(out)).strip("._ ")
+    if not r:
+        raise ValueError("Некорректное имя пресета")
+    return r
+
+
 def do_copy(d):
     root, target = d["source"], d["target"]
     files = d["files"]
     if not os.path.isdir(root):
         raise ValueError("Папка проекта не существует")
     if not target.strip():
-        raise ValueError("Не указана целевая папка")
-    ar, at = os.path.abspath(root), os.path.abspath(target)
-    if at == ar or ar.startswith(at + os.sep):
-        raise ValueError("Целевая папка совпадает с проектом или содержит его")
+        raise ValueError("Не указана папка вывода")
+    ar, base = os.path.abspath(root), os.path.abspath(target)
+    at = os.path.join(base, translit(d.get("preset_name", "")))
+    if at == ar or ar.startswith(at + os.sep) or base == ar:
+        raise ValueError("Папка вывода пресета пересекается с проектом")
     if d.get("clean") and os.path.isdir(at):
         for n in os.listdir(at):
             p = os.path.join(at, n)
@@ -108,13 +130,14 @@ def do_copy(d):
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copy2(src, dst)
         n += 1
-    parts = [p.strip() for p in (d.get("general_prompt", ""), d.get("preset_prompt", "")) if p.strip()]
-    prompt_written = False
-    if parts:
-        with open(os.path.join(at, PROMPT_FILE_NAME), "w", encoding="utf-8") as f:
-            f.write("\n\n".join(parts) + "\n")
-        prompt_written = True
-    return {"copied": n, "prompt": prompt_written, "target": at}
+    gp, pp = d.get("general_prompt", "").strip(), d.get("preset_prompt", "").strip()
+    if gp:
+        with open(os.path.join(base, PROJECT_PROMPT_NAME), "w", encoding="utf-8") as f:
+            f.write(gp + "\n")
+    if pp:
+        with open(os.path.join(at, PRESET_PROMPT_NAME), "w", encoding="utf-8") as f:
+            f.write(pp + "\n")
+    return {"copied": n, "general": bool(gp), "agents": bool(pp), "target": at}
 
 
 class H(BaseHTTPRequestHandler):
@@ -211,10 +234,10 @@ h3{margin:12px 0 4px}
  <div id="tree"></div>
 </div>
 <div id="right">
- <label>Целевая папка копирования</label><input type="text" id="target">
- <label><input type="checkbox" id="clean" checked> Очистить целевую папку перед копированием</label>
- <h3>Общий промт проекта</h3><textarea id="gp" rows="4"></textarea>
- <h3>Промт пресета</h3><textarea id="pp" rows="4"></textarea>
+ <label>Папка вывода (файлы пойдут в подпапку = транслит имени пресета)</label><input type="text" id="target">
+ <label><input type="checkbox" id="clean" checked> Очистить папку пресета перед копированием</label>
+ <h3>Общий промт проекта (PROJECT_PROMPT.md в корень вывода)</h3><textarea id="gp" rows="4"></textarea>
+ <h3>Промт пресета (AGENTS.md в папке пресета)</h3><textarea id="pp" rows="4"></textarea>
  <input type="text" id="pname" placeholder="Имя пресета">
  <button onclick="savePreset()">Сохранить пресет</button>
  <button onclick="copyNow()" style="font-weight:700">Копировать в целевую папку</button>
@@ -280,10 +303,11 @@ async function delPresets(){const names=checked();if(!names.length||!confirm('У
  for(const n of names)await api('/api/preset/delete',{name:n});await reloadPresets();}
 async function copyNow(){
  if(!root)return msg('Сначала загрузите дерево',false);
+ if(!$('pname').value.trim())return msg('Введите имя пресета (оно задаёт имя папки)',false);
  try{await api('/api/settings',{source:$('source').value,target:$('target').value,general_prompt:$('gp').value});
- const j=await api('/api/copy',{source:$('source').value,target:$('target').value,files:[...sel],clean:$('clean').checked,
+ const j=await api('/api/copy',{source:$('source').value,target:$('target').value,preset_name:$('pname').value,files:[...sel],clean:$('clean').checked,
  general_prompt:$('gp').value,preset_prompt:$('pp').value});
- msg('Скопировано файлов: '+j.copied+(j.prompt?' + промт':'')+' → '+j.target,true);}catch(e){msg(e.message,false);}}
+ msg('Скопировано файлов: '+j.copied+(j.agents?' + AGENTS.md':'')+(j.general?' + PROJECT_PROMPT.md':'')+' → '+j.target,true);}catch(e){msg(e.message,false);}}
 $('gp').onchange=()=>api('/api/settings',{general_prompt:$('gp').value});
 (async()=>{const s=await api('/api/state');$('source').value=s.settings.source;$('target').value=s.settings.target;
  $('gp').value=s.settings.general_prompt;presets=s.presets;renderPresets();loadTree();})();
